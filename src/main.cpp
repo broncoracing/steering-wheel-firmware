@@ -17,8 +17,6 @@ int led = 13;
 // NEOPIXELS
 int pixelPin = 10;
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(16, pixelPin, NEO_GRB + NEO_KHZ800);
-
-// Neopixel Parameters
 int wakeUp = 1500;
 int shiftRpm = 9000;
 int redline = 11250;
@@ -104,15 +102,15 @@ void setup() {
   enableDRSMsg.len = 8;
   disableDRSMsg.len = 8;
 
-  upShiftMsg.buf[0] = 10;
-  downShiftMsg.buf[0] = 11;
-  enableDRSMsg.buf[0] = 12;
-  disableDRSMsg.buf[0] = 13;
+  upShiftMsg.buf[0] = 10;    // 0x0A
+  downShiftMsg.buf[0] = 11;  // 0x0B
+  enableDRSMsg.buf[0] = 12;  // 0x0C
+  disableDRSMsg.buf[0] = 13; // 0x0D
 
   //----- NEOPIXEL SETUP -----
   strip.begin();
   for (int i = 0; i < 16; i++) {
-    strip.setPixelColor(i, 255, 0, 255);
+    strip.setPixelColor(i, 0, 255, 255);
   }
   strip.show();
 }
@@ -217,6 +215,12 @@ void disableDRS() {
 
 void setLights(int rpm) {
 
+  if (rpm == 0) {
+    strip.clear();
+    strip.setPixelColor(0, 0, 255, 0);
+    strip.setPixelColor(15, 0, 255, 0);
+  }
+
   if (rpm < shiftRpm) { // ----- NORMAL REVS -----
 
     strip.clear();
@@ -252,7 +256,7 @@ void setLights(int rpm) {
 
   if (rpm > redline) { //----- REDLINE -----
     for (unsigned int i = 0; i < strip.numPixels(); i++) {
-      strip.setPixelColor(i, 255, 0, 0);
+      strip.setPixelColor(i, 255, 0, 255);
     }
 
     strip.show();
@@ -266,9 +270,11 @@ void setLights(int rpm) {
 void changeSetting() {
   Serial.println("Brightness Setting Changed");
   if (strip.getBrightness() == 255) {
-    strip.setBrightness(30); // Night mode
+    strip.setBrightness(25); // Night mode
+    strip.show();
   } else {
     strip.setBrightness(255);
+    strip.show();
   }
 }
 
