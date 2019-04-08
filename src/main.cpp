@@ -30,22 +30,30 @@ int rpm = 0;
 
 // Necessary CAN frames
 CAN_message_t inMsg;
+
 CAN_message_t downShiftMsg;
 CAN_message_t upShiftMsg;
-CAN_message_t DRSPressedMsg;
-CAN_message_t DRSReleasedMsg;
+
+CAN_message_t enableDRSMsg;
+CAN_message_t disableDRSMsg;
 
 // Function Prototypes
 void upShift();
 void downShift();
-void DRSPressed();
-void DRSReleased();
+
+void enableDRS();
+void disableDRS();
 void DRSChanged();
+
 void setLights(int rpm);
+
 void downTrig();
 void upTrig();
+
 void settingTrig();
 void changeSetting();
+
+bool checkPin(int pin, int activeState);
 
 volatile bool shouldUpShift = false;
 volatile bool shouldDownShift = false;
@@ -64,10 +72,7 @@ void setup() {
   pinMode(DRSPin, INPUT_PULLUP);
   pinMode(settingPin, INPUT_PULLUP);
 
-  // input is 3.3v
-  // other pin is commonground
-
-  // LED setup
+  // onboard LED setup
   pinMode(13, OUTPUT);
   digitalWrite(13, HIGH);
 
@@ -77,6 +82,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(DRSPin), DRSChanged, CHANGE);
   attachInterrupt(digitalPinToInterrupt(settingPin), settingTrig, FALLING);
 
+  // BR CAN speed
   Can0.begin(250000);
 
   // Allow Extended CAN id's through
@@ -90,18 +96,18 @@ void setup() {
   inMsg.ext = true;
   downShiftMsg.ext = true;
   upShiftMsg.ext = true;
-  DRSPressedMsg.ext = true;
-  DRSReleasedMsg.ext = true;
+  enableDRSMsg.ext = true;
+  disableDRSMsg.ext = true;
 
   upShiftMsg.len = 8;
   downShiftMsg.len = 8;
-  DRSPressedMsg.len = 8;
-  DRSReleasedMsg.len = 8;
+  enableDRSMsg.len = 8;
+  disableDRSMsg.len = 8;
 
   upShiftMsg.buf[0] = 10;
   downShiftMsg.buf[0] = 11;
-  DRSPressedMsg.buf[0] = 12;
-  DRSReleasedMsg.buf[0] = 13;
+  enableDRSMsg.buf[0] = 12;
+  disableDRSMsg.buf[0] = 13;
 
   //----- NEOPIXEL SETUP -----
   strip.begin();
@@ -113,9 +119,7 @@ void setup() {
 
 void loop() {
   if (shouldUpShift == true) {
-    delay(20);
-    if (digitalRead(upShiftPin) == LOW) {
-      shouldUpShift = false;
+    if (checkPin(upShiftPin, 0)) {
       upShift();
       delay(150);
     }
@@ -123,9 +127,7 @@ void loop() {
   }
 
   if (shouldDownShift == true) {
-    delay(20);
-    if (digitalRead(downShiftPin) == LOW) {
-      shouldDownShift = false;
+    if (checkPin(downShiftPin, 0)) {
       downShift();
       delay(150);
     }
@@ -133,9 +135,7 @@ void loop() {
   }
 
   if (shouldChangeSetting == true) {
-    delay(20);
-    if (digitalRead(settingPin) == LOW) {
-      shouldChangeSetting = false;
+    if (checkPin(settingPin, 0)) {
       changeSetting();
       delay(150);
     }
@@ -143,14 +143,18 @@ void loop() {
   }
 
   if (shouldDisableDRS == true) {
-    DRSReleased();
-    delay(100);
+    if (checkPin(DRSPin, 1)) {
+      disableDRS();
+      delay(150);
+    }
     shouldDisableDRS = false;
   }
 
   if (shouldEnableDRS == true) {
-    DRSPressed();
-    delay(100);
+    if (checkPin(DRSPin, 0)) {
+      enableDRS();
+      delay(150);
+    }
     shouldEnableDRS = false;
   }
 
@@ -189,30 +193,22 @@ void upShift() {
 
 void DRSChanged() {
   if (digitalRead(DRSPin) == 1) { // rising
-    delay(20);
-    if (digitalRead(DRSPin) == 1) { // rising
-      shouldDisableDRS = true;
-    }
-  } else { // falling
-    if (digitalRead(DRSPin) == 0) {
-      delay(20);
-      if (digitalRead(DRSPin) == 0) {
-        shouldEnableDRS = true;
-      }
-    }
+    shouldDisableDRS = true;
+  } else if (digitalRead(DRSPin) == 0) { // falling
+    shouldEnableDRS = true;
   }
 }
 
-void DRSPressed() {
+void enableDRS() {
   Serial.println("DRS Pressed");
-  if (Can0.write(DRSPressedMsg)) {
+  if (Can0.write(enableDRSMsg)) {
     Serial.println("DRS Press successful");
   }
 }
 
-void DRSReleased() {
+void disableDRS() {
   Serial.println("DRS Released");
-  if (Can0.write(DRSReleasedMsg)) {
+  if (Can0.write(disableDRSMsg)) {
     Serial.println("DRS Release successful");
   }
 }
@@ -274,4 +270,18 @@ void changeSetting() {
   } else {
     strip.setBrightness(255);
   }
+}
+
+// Pass pin and wanted/active state as params
+// True if clean press, false if not
+bool checkPin(int pin, int activeState) {
+  delay(5); // Allow pin to settle
+  bool success = true;
+  for (int i = 0; i < 20; i++) {
+    if (digitalRead(pin) != activeState) {
+      success = false;
+    }
+    delay(1);
+  }
+  return success;
 }
