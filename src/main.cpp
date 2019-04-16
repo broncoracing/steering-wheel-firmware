@@ -22,6 +22,9 @@ int shiftRpm = 9000;
 int redline = 11250;
 int brightness = 255; // 0 to 255
 int delayVal = 35;    // set wakeup sequence speed
+long lastEcuMillis = 0;
+bool ecuOn = false;
+bool EngRunning = false;
 
 // CAN Frame Data
 int rpm = 0;
@@ -97,6 +100,11 @@ void setup() {
   enableDRSMsg.ext = true;
   disableDRSMsg.ext = true;
 
+  upShiftMsg.id = 0;
+  downShiftMsg.id = 0;
+  enableDRSMsg.id = 0;
+  disableDRSMsg.id = 0;
+
   upShiftMsg.len = 8;
   downShiftMsg.len = 8;
   enableDRSMsg.len = 8;
@@ -109,9 +117,20 @@ void setup() {
 
   //----- NEOPIXEL SETUP -----
   strip.begin();
-  for (int i = 0; i < 16; i++) {
-    strip.setPixelColor(i, 0, 255, 255);
+  for (int j = 0; j < 2; j++) {
+    for (int i = 0; i < 16; i++) {
+      strip.setPixelColor(i, 255, 255, 255);
+      strip.setPixelColor(15 - i, 255, 255, 255);
+      strip.show();
+      delay(25);
+      strip.setPixelColor(i, 0, 0, 0);
+      strip.setPixelColor(15 - i, 0, 0, 0);
+      strip.show();
+    }
   }
+
+  strip.setPixelColor(14, 255, 255, 255);
+  strip.setPixelColor(1, 255, 255, 255);
   strip.show();
 }
 
@@ -161,11 +180,29 @@ void loop() {
     Can0.read(inMsg);
 
     if (inMsg.id == 218099784) { // This frame carries RPM and TPS
+      lastEcuMillis = millis();  // start a timer for the next frame
+      ecuOn = true;
+
       int lowByte = inMsg.buf[0];
       int highByte = inMsg.buf[1];
       rpm = ((highByte * 256) + lowByte);
+      if (rpm > 500) {
+        EngRunning = true;
+      }
       setLights(rpm);
     }
+  }
+
+  if ((millis() - lastEcuMillis) > 500) {
+    ecuOn = false;
+    EngRunning = false;
+  }
+
+  if (ecuOn == false) {
+    strip.clear();
+    strip.setPixelColor(14, 255, 255, 255);
+    strip.setPixelColor(1, 255, 255, 255);
+    strip.show();
   }
 }
 
@@ -230,7 +267,8 @@ void setLights(int rpm) {
         ((redline - wakeUp) / numLEDs); // calculates how many rpm per led
     int ledsToLight = ceil(rpm / rpmPerLED);
 
-    for (int i = 0; i <= ledsToLight; i++) {
+    // FLIPPED STRIP
+    for (int i = 15; i >= 15 - ledsToLight; i--) {
 
       strip.setPixelColor(i, 0, 255, 0);
     }
@@ -246,7 +284,8 @@ void setLights(int rpm) {
         ((redline - wakeUp) / numLEDs); // calculates how many rpm per led
     int ledsToLight = ceil(rpm / rpmPerLED);
 
-    for (int i = 0; i <= ledsToLight; i++) {
+    // FLIPPED STRIP
+    for (int i = 15; i >= 15 - ledsToLight; i--) {
 
       strip.setPixelColor(i, 255, 255, 0); // yellow
     }
@@ -256,9 +295,8 @@ void setLights(int rpm) {
 
   if (rpm > redline) { //----- REDLINE -----
     for (unsigned int i = 0; i < strip.numPixels(); i++) {
-      strip.setPixelColor(i, 255, 0, 255);
+      strip.setPixelColor(i, 255, 0, 0);
     }
-
     strip.show();
     delay(20);
     strip.clear();
