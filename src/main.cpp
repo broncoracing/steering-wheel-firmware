@@ -3,12 +3,9 @@
 #include <FlexCAN.h>
 
 // Button Inputs
-// Be sure to debounce with a cap, otherwise interrupt will trigger on button
-// release bounces. 2.2uF works.
-
 int downShiftPin = 14; // Left paddle (on rear)
 int upShiftPin = 15;   // Right paddle (on rear)
-int DRSPin = 16;       // Right front button
+int launchPin = 16;    // Right front button
 int settingPin = 17;   // Left front button
 
 // CAN Status LED
@@ -26,25 +23,22 @@ long lastEcuMillis = 0;
 bool ecuOn = false;
 bool EngRunning = false;
 
+elapsedMillis launchMessageTimer;
+
 // CAN Frame Data
 int rpm = 0;
 
 // Necessary CAN frames
 CAN_message_t inMsg;
-
 CAN_message_t downShiftMsg;
 CAN_message_t upShiftMsg;
-
-CAN_message_t enableDRSMsg;
-CAN_message_t disableDRSMsg;
+CAN_message_t halfShiftMsg;
+CAN_message_t launchMsg;
 
 // Function Prototypes
 void upShift();
 void downShift();
-
-void enableDRS();
-void disableDRS();
-void DRSChanged();
+void halfShift();
 
 void setLights(int rpm);
 
@@ -60,9 +54,6 @@ volatile bool shouldUpShift = false;
 volatile bool shouldDownShift = false;
 volatile bool shouldChangeSetting = false;
 
-volatile bool shouldEnableDRS = false;
-volatile bool shouldDisableDRS = false;
-
 void setup() {
   Serial.begin(9600);
   Serial.println("Online");
@@ -70,8 +61,8 @@ void setup() {
   // Pull up all input pins
   pinMode(downShiftPin, INPUT_PULLUP);
   pinMode(upShiftPin, INPUT_PULLUP);
-  pinMode(DRSPin, INPUT_PULLUP);
   pinMode(settingPin, INPUT_PULLUP);
+  pinMode(launchPin, INPUT_PULLUP);
 
   // onboard LED setup
   pinMode(13, OUTPUT);
@@ -80,7 +71,6 @@ void setup() {
   // Attach Interrupts
   attachInterrupt(digitalPinToInterrupt(downShiftPin), downTrig, FALLING);
   attachInterrupt(digitalPinToInterrupt(upShiftPin), upTrig, FALLING);
-  attachInterrupt(digitalPinToInterrupt(DRSPin), DRSChanged, CHANGE);
   attachInterrupt(digitalPinToInterrupt(settingPin), settingTrig, FALLING);
 
   // BR CAN speed
@@ -97,23 +87,23 @@ void setup() {
   inMsg.ext = true;
   downShiftMsg.ext = true;
   upShiftMsg.ext = true;
-  enableDRSMsg.ext = true;
-  disableDRSMsg.ext = true;
+  halfShiftMsg.ext = true;
+  launchMsg.ext = true;
 
   upShiftMsg.id = 0;
   downShiftMsg.id = 0;
-  enableDRSMsg.id = 0;
-  disableDRSMsg.id = 0;
+  halfShiftMsg.id = 0;
+  launchMsg.id = 1;
 
   upShiftMsg.len = 8;
   downShiftMsg.len = 8;
-  enableDRSMsg.len = 8;
-  disableDRSMsg.len = 8;
+  halfShiftMsg.len = 8;
+  launchMsg.len = 8;
 
-  upShiftMsg.buf[0] = 10;    // 0x0A
-  downShiftMsg.buf[0] = 11;  // 0x0B
-  enableDRSMsg.buf[0] = 12;  // 0x0C
-  disableDRSMsg.buf[0] = 13; // 0x0D
+  upShiftMsg.buf[0] = 10;   // 0x0A
+  downShiftMsg.buf[0] = 11; // 0x0B
+  halfShiftMsg.buf[0] = 14; // 0x0E
+  launchMsg.buf[0] = 1;
 
   //----- NEOPIXEL SETUP -----
   strip.begin();
@@ -135,6 +125,16 @@ void setup() {
 }
 
 void loop() {
+
+  if (launchMessageTimer > 100) {
+    // Serial.println(digitalRead(launchPin));
+    launchMsg.buf[0] = digitalRead(launchPin);
+    if (Can0.write(launchMsg)) {
+      Serial.println(launchMsg.buf[0]);
+    }
+    launchMessageTimer = 0;
+  }
+
   if (shouldUpShift == true) {
     if (checkPin(upShiftPin, 0)) {
       upShift();
@@ -145,34 +145,36 @@ void loop() {
 
   if (shouldDownShift == true) {
     if (checkPin(downShiftPin, 0)) {
-      downShift();
+      if (rpm < 10000) { // Anti Money Shift
+        downShift();
+      }
       delay(150);
     }
     shouldDownShift = false;
   }
 
   if (shouldChangeSetting == true) {
+    // if (checkPin(settingPin, 0)) {
+    //   changeSetting();
+    //   delay(150);
+    // }
+
+    bool didBreak = false;
+
     if (checkPin(settingPin, 0)) {
-      changeSetting();
-      delay(150);
+      for (int i = 0; i < 20; i++) {
+        if (checkPin(settingPin, 0) == false) {
+          changeSetting();
+          didBreak = true;
+          break;
+        }
+      }
+
+      if (didBreak == false) {
+        halfShift();
+      }
     }
     shouldChangeSetting = false;
-  }
-
-  if (shouldDisableDRS == true) {
-    if (checkPin(DRSPin, 1)) {
-      disableDRS();
-      delay(150);
-    }
-    shouldDisableDRS = false;
-  }
-
-  if (shouldEnableDRS == true) {
-    if (checkPin(DRSPin, 0)) {
-      enableDRS();
-      delay(150);
-    }
-    shouldEnableDRS = false;
   }
 
   if (Can0.available()) {
@@ -189,7 +191,34 @@ void loop() {
       if (rpm > 500) {
         EngRunning = true;
       }
-      setLights(rpm);
+      if (rpm > 6000) {
+        setLights(rpm);
+      }
+    }
+
+    if (inMsg.id == 6) {
+      if (rpm < 6000) { // Show info on tach
+        strip.clear();
+
+        if (ecuOn == true) {
+          strip.setPixelColor(1, 0, 255, 0);
+          strip.setPixelColor(14, 0, 255, 0);
+        } else {
+          strip.setPixelColor(1, 255, 255, 255);
+          strip.setPixelColor(14, 255, 255, 255);
+        }
+
+        if (inMsg.buf[0] == 0) { // Neutral
+          for (int i = 6; i < 10; i++) {
+            strip.setPixelColor(i, 0, 255, 0);
+          }
+        } else if (inMsg.buf[0] == 1) { // In gear
+          for (int i = 6; i < 10; i++) {
+            strip.setPixelColor(i, 255, 255, 255);
+          }
+        }
+        strip.show();
+      }
     }
   }
 
@@ -199,6 +228,7 @@ void loop() {
   }
 
   if (ecuOn == false) {
+    rpm = 0;
     strip.clear();
     strip.setPixelColor(14, 255, 255, 255);
     strip.setPixelColor(1, 255, 255, 255);
@@ -226,25 +256,10 @@ void upShift() {
   }
 }
 
-void DRSChanged() {
-  if (digitalRead(DRSPin) == 1) { // rising
-    shouldDisableDRS = true;
-  } else if (digitalRead(DRSPin) == 0) { // falling
-    shouldEnableDRS = true;
-  }
-}
-
-void enableDRS() {
-  Serial.println("DRS Pressed");
-  if (Can0.write(enableDRSMsg)) {
-    Serial.println("DRS Press successful");
-  }
-}
-
-void disableDRS() {
-  Serial.println("DRS Released");
-  if (Can0.write(disableDRSMsg)) {
-    Serial.println("DRS Release successful");
+void halfShift() {
+  Serial.println("HalfShift");
+  if (Can0.write(halfShiftMsg)) {
+    Serial.println("HalfShift successful");
   }
 }
 
