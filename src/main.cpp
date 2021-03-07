@@ -13,12 +13,15 @@ int led = 13;
 
 // NEOPIXELS
 int pixelPin = 10;
+int statusPixelsPin = 11;
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(16, pixelPin, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel statusStrip =
+    Adafruit_NeoPixel(6, statusPixelsPin, NEO_GRB + NEO_KHZ800);
+
 int wakeUp = 1500;
-int shiftRpm = 9000;
-int redline = 11250;
+int shiftRpm = 11000;
+int redline = 13500;
 int brightness = 255; // 0 to 255
-int delayVal = 35;    // set wakeup sequence speed
 long lastEcuMillis = 0;
 bool ecuOn = false;
 bool EngRunning = false;
@@ -83,7 +86,7 @@ void setup() {
     Can0.setFilter(allPassFilter, filterNum);
   }
 
-  //----- FRAME DEFINITIONS -----
+  // ----- FRAME DEFINITIONS -----
   inMsg.ext = true;
   downShiftMsg.ext = true;
   upShiftMsg.ext = true;
@@ -107,21 +110,75 @@ void setup() {
 
   //----- NEOPIXEL SETUP -----
   strip.begin();
-  for (int j = 0; j < 2; j++) {
-    for (int i = 0; i < 16; i++) {
-      strip.setPixelColor(i, 255, 255, 255);
-      strip.setPixelColor(15 - i, 255, 255, 255);
-      strip.show();
-      delay(25);
-      strip.setPixelColor(i, 0, 0, 0);
-      strip.setPixelColor(15 - i, 0, 0, 0);
-      strip.show();
-    }
+  statusStrip.begin();
+
+  for (int i = 0; i < 16; i++) {
+    strip.setPixelColor(i, 255, 255, 255);
+    strip.show();
+    delay(50);
   }
 
-  strip.setPixelColor(14, 255, 255, 255);
-  strip.setPixelColor(1, 255, 255, 255);
+  for (int i = 0; i < 6; i++) {
+    statusStrip.setPixelColor(i, 255, 255, 255);
+    statusStrip.show();
+    delay(100);
+  }
+
+  strip.clear();
+  statusStrip.clear();
   strip.show();
+  statusStrip.show();
+
+  for (int i = 0; i < 16; i++) {
+    strip.setPixelColor(i, 255, 0, 0);
+    strip.show();
+  }
+
+  for (int i = 0; i < 6; i++) {
+    statusStrip.setPixelColor(i, 255, 0, 0);
+    statusStrip.show();
+  }
+
+  delay(500);
+
+  strip.clear();
+  statusStrip.clear();
+  strip.show();
+  statusStrip.show();
+
+  for (int i = 0; i < 16; i++) {
+    strip.setPixelColor(i, 0, 0, 255);
+    strip.show();
+  }
+
+  for (int i = 0; i < 6; i++) {
+    statusStrip.setPixelColor(i, 0, 0, 255);
+    statusStrip.show();
+  }
+
+  delay(500);
+
+  strip.clear();
+  statusStrip.clear();
+  strip.show();
+  statusStrip.show();
+
+  for (int i = 0; i < 16; i++) {
+    strip.setPixelColor(i, 0, 255, 0);
+    strip.show();
+  }
+
+  for (int i = 0; i < 6; i++) {
+    statusStrip.setPixelColor(i, 0, 255, 0);
+    statusStrip.show();
+  }
+
+  delay(1000);
+
+  strip.clear();
+  statusStrip.clear();
+  strip.show();
+  statusStrip.show();
 }
 
 void loop() {
@@ -130,7 +187,7 @@ void loop() {
     // Serial.println(digitalRead(launchPin));
     launchMsg.buf[0] = digitalRead(launchPin);
     if (Can0.write(launchMsg)) {
-      Serial.println(launchMsg.buf[0]);
+      // Serial.println(launchMsg.buf[0]);
     }
     launchMessageTimer = 0;
   }
@@ -181,8 +238,8 @@ void loop() {
     digitalWrite(led, !digitalRead(led));
     Can0.read(inMsg);
 
-    if (inMsg.id == 218099784) { // This frame carries RPM and TPS
-      lastEcuMillis = millis();  // start a timer for the next frame
+    if (inMsg.id == 0x0CFFF048) { // This frame carries RPM and TPS
+      lastEcuMillis = millis();   // start a timer for the next frame
       ecuOn = true;
 
       int lowByte = inMsg.buf[0];
@@ -196,8 +253,9 @@ void loop() {
       }
     }
 
-    if (inMsg.id == 6) {
+    if (inMsg.id == 20) {
       if (rpm < 6000) { // Show info on tach
+
         strip.clear();
 
         if (ecuOn == true) {
@@ -212,7 +270,7 @@ void loop() {
           for (int i = 6; i < 10; i++) {
             strip.setPixelColor(i, 0, 255, 0);
           }
-        } else if (inMsg.buf[0] == 1) { // In gear
+        } else { // In gear
           for (int i = 6; i < 10; i++) {
             strip.setPixelColor(i, 255, 255, 255);
           }
@@ -229,10 +287,10 @@ void loop() {
 
   if (ecuOn == false) {
     rpm = 0;
-    strip.clear();
-    strip.setPixelColor(14, 255, 255, 255);
-    strip.setPixelColor(1, 255, 255, 255);
-    strip.show();
+    // strip.clear();
+    // strip.setPixelColor(14, 255, 255, 255);
+    // strip.setPixelColor(1, 255, 255, 255);
+    // strip.show();
   }
 }
 
@@ -324,10 +382,14 @@ void changeSetting() {
   Serial.println("Brightness Setting Changed");
   if (strip.getBrightness() == 255) {
     strip.setBrightness(25); // Night mode
+    statusStrip.setBrightness(25);
     strip.show();
+    statusStrip.show();
   } else {
     strip.setBrightness(255);
+    statusStrip.setBrightness(255);
     strip.show();
+    statusStrip.show();
   }
 }
 
